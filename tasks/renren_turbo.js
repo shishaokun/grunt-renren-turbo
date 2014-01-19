@@ -9,6 +9,7 @@
 'use strict';
 
 //var connect = require('connect');
+var async = require('async');
 var http = require('http');
 var url = require('url');
 var fs = require('fs');
@@ -18,23 +19,36 @@ var grunt;
 
 var $maps = {};
 
-var collectMaps = function (path) {
+var collectMaps = function (path, callback) {
     path = path.replace(/\/?$/, '/');
-    fs.readdirSync(path).filter(function (f) {
-        return f.charAt(0) !== '.';
-    }).forEach(function (f) {
-        var stats = fs.statSync(path + f), fileContent;
-        if (stats.isFile()) {
-            if (f === 'template-config.xml') {
-                fileContent = fs.readFileSync(path + f, {encoding: 'utf-8'}).match(/url="([^"]+)"/);
-                if (fileContent) {
-                    $maps[fileContent[1]] = path;
+    fs.readdir(path, function (err, files) {
+        files = files.filter(function (f) {
+            return f.charAt(0) !== '.';
+        });
+        async.each(files, function (f, cb) {
+            fs.stat(path + f, function (err, stats) {
+                if (stats.isFile()) {
+                    if (f === 'template-config.xml') {
+                        fs.readFile(path + f, {encoding: 'utf-8'}, function (err, data) {
+                            data = data.match(/url="([^"]+)"/);
+                            if (data) {
+                                $maps[data[1]] = path;
+                            }
+                            cb();
+                        });
+                    }
+                    else {
+                        cb();
+                    }
                 }
-            }
-        }
-        else if (stats.isDirectory()) {
-            collectMaps(path + f + '/');
-        }
+                else if (stats.isDirectory()) {
+                    collectMaps(path + f + '/', cb);
+                }
+                else {
+                    cb();
+                }
+            });
+        }, callback);
     });
 };
 
@@ -163,7 +177,14 @@ var compileJS = function (repo, pathname, callback) {
 
 var compileCSS = function (repo, pathname, callback) {
     var filepath = path.join(repo, 'src/', pathname),
-        readfile = function (filepath) {
+        readfile = function (filepath, stack) {
+            if (stack.indexOf(filepath) > -1) {
+                grunt.log.error('循环的路径: ' + filepath);
+                return '';
+            }
+            else {
+                stack.push(filepath);
+            }
             return fs
                     .readFileSync(filepath, {encoding: 'utf-8'})
                     .replace(/^@import\surl\(["']?([^"'\(\)]+)["']?\);/mg, function (str, p) {
@@ -171,7 +192,7 @@ var compileCSS = function (repo, pathname, callback) {
                 p = path.join(filepath.replace(/[^\/]+$/, ''), p);
                 if (p.indexOf(repo) === 0) {
                     if (fs.existsSync(p)) {
-                        return '/* from: ' + p + ' */\n' + readfile(p);
+                        return '/* from: ' + p + ' */\n' + readfile(p, stack);
                     }
                     else {
                         grunt.log.error('错误的路径: ' + p);
@@ -196,7 +217,7 @@ var compileCSS = function (repo, pathname, callback) {
         fileStr;
 
     if (fs.existsSync(filepath)) {
-        callback(null, '/* from: ' + filepath + ' */\n' + readfile(filepath));
+        callback(null, '/* from: ' + filepath + ' */\n' + readfile(filepath, []));
     }
     else {
         callback({code: 404});
@@ -214,86 +235,106 @@ var output = function (response, content, type) {
     response.end();
 };
 
+var onRequest = function (request, response) {
+
+    var pathname = url.parse(request.url).pathname;
+    var svnfilepath = request.headers['x-request-filename'];
+    var fileType = /\.js$/.test(pathname) ? 'javascript' : 'css';
+    var repo = findPackage(svnfilepath);
+    var reg = /\//g, subpathname;
+    var readFileSVN = function (type) {
+        if (fs.existsSync(svnfilepath)) {
+            grunt.log.ok('svn: ' + pathname);
+            output(response, fs.readFileSync(svnfilepath), type);
+        }
+        else {
+            grunt.log.error('404: ' + pathname);
+            output(response, '404 Not Found', 404);
+        }
+    };
+
+    if (repo && $maps[repo.package]) {
+
+        while (reg.test(repo.packagePath)) {
+            if (pathname.indexOf(repo.packagePath.slice(reg.lastIndex - 1)) === 0) {
+                subpathname = pathname.slice(repo.packagePath.length - reg.lastIndex + 1);
+                break;
+            }
+        }
+
+        if (fileType === 'javascript') {
+            compileJS($maps[repo.package], subpathname, function (err, data) {
+                if (data) {
+                    grunt.log.ok('hg: ' + pathname);
+                    output(response, data, 'javascript');
+                }
+                else if (err.code === 502) {
+                    grunt.log.error('502: ' + err.message);
+                    output(response, err.message, 502);
+                }
+                else {
+                    readFileSVN('javascript');
+                }
+            });
+        }
+        else if (fileType === 'css') {
+            compileCSS($maps[repo.package], subpathname.replace(/-all-min(\.css)$/, '$1'), function (err, data) {
+                if (data) {
+                    grunt.log.ok('hg: ' + pathname);
+                    output(response, data, 'css');
+                }
+                else {
+                    readFileSVN('css');
+                }
+            });
+        }
+    }
+    else {
+        readFileSVN('css');
+    }
+};
+
+
 module.exports = function(g) {
 
   grunt = g;
 
   grunt.registerMultiTask('renren_turbo', '人人网前端开发套件', function() {
+
     var options = this.options({
       base: './',
       port: '7070'
     });
 
-    var done = this.async();
-
-    grunt.log.write('准备工作区...\n');
-
     grunt.file.setBase(options.base);
 
-    collectMaps(options.base);
+    grunt.log.write('\n准备工作区');
 
-    http.createServer()
-    .listen(options.port)
-    .on('request', function (request, response) {
+    var done = this.async();
 
-        var pathname = url.parse(request.url).pathname;
-        var svnfilepath = request.headers['x-request-filename'];
-        var fileType = /\.js$/.test(pathname) ? 'javascript' : 'css';
-        var repo = findPackage(svnfilepath);
-        var reg = /\//g, subpathname;
-        var readFileSVN = function (type) {
-            if (fs.existsSync(svnfilepath)) {
-                grunt.log.ok('svn: ' + pathname);
-                output(response, fs.readFileSync(svnfilepath), type);
-            }
-            else {
-                grunt.log.error('404: ' + pathname);
-                output(response, '404 Not Found', 404);
-            }
-        };
+    var timer = setInterval(function () {
+        grunt.log.write('.');
+    }, 200);
 
-        if (repo && $maps[repo.package]) {
-
-            while (reg.test(repo.packagePath)) {
-                if (pathname.indexOf(repo.packagePath.slice(reg.lastIndex - 1)) === 0) {
-                    subpathname = pathname.slice(repo.packagePath.length - reg.lastIndex + 1);
-                    break;
-                }
-            }
-
-            if (fileType === 'javascript') {
-                compileJS($maps[repo.package], subpathname, function (err, data) {
-                    if (data) {
-                        grunt.log.ok('hg: ' + pathname);
-                        output(response, data, 'javascript');
-                    }
-                    else if (err.code === 502) {
-                        grunt.log.error('502: ' + err.message);
-                        output(response, err.message, 502);
-                    }
-                    else {
-                        readFileSVN('javascript');
-                    }
-                });
-            }
-            else if (fileType === 'css') {
-                compileCSS($maps[repo.package], subpathname.replace(/-all-min(\.css)$/, '$1'), function (err, data) {
-                    if (data) {
-                        grunt.log.ok('hg: ' + pathname);
-                        output(response, data, 'css');
-                    }
-                    else {
-                        readFileSVN('css');
-                    }
-                });
-            }
+    async.series([
+        function (callback) {
+            collectMaps(options.base, function () {
+                callback();
+            });
+        },
+        function (callback) {
+            http.createServer()
+            .listen(options.port)
+            .on('listening', function () {
+                callback();
+            })
+            .on('request', onRequest);
         }
-        else {
-            readFileSVN('css');
-        }
+    ],
+    function () {
+        clearInterval(timer);
+        grunt.log.success(' 准备完毕, 等待请求...\n');
     });
-
-    grunt.log.success('准备工作就绪, 等待请求...');
 
   });
 
