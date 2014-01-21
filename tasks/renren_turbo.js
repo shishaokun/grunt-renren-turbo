@@ -13,7 +13,15 @@ var async = require('async');
 var http = require('http');
 var url = require('url');
 var fs = require('fs');
-var path = require('path');
+var pathOrg = require('path');
+var path = {
+    normalize: function (p) {
+        return pathOrg.normalize(p).split(pathOrg.sep).join('/');
+    },
+    join: function (p/*, p2, p3 ...*/) {
+        return pathOrg.join.apply(pathOrg, arguments).split(pathOrg.sep).join('/');
+    }
+};
 var xml2js = require('xml2js');
 var grunt;
 
@@ -237,8 +245,8 @@ var output = function (response, content, type) {
 
 var onRequest = function (request, response) {
 
-    var pathname = url.parse(request.url).pathname;
-    var svnfilepath = request.headers['x-request-filename'];
+    var pathname = path.normalize(url.parse(request.url).pathname);
+    var svnfilepath = path.normalize(request.headers['x-request-filename']);
     var fileType = /\.js$/.test(pathname) ? 'javascript' : 'css';
     var repo = findPackage(svnfilepath);
     var reg = /\//g, subpathname;
