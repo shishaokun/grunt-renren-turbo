@@ -299,14 +299,12 @@ module.exports = function(g) {
 
   grunt = g;
 
-  grunt.registerMultiTask('renren_turbo', '人人网前端开发套件', function() {
+  grunt.registerMultiTask('renren_turbo', '前端开发套件', function() {
 
     var options = this.options({
       base: './',
       port: '7070'
     });
-
-    grunt.file.setBase(options.base);
 
     grunt.log.write('\n准备工作区');
 
