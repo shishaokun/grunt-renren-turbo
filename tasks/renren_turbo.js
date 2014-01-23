@@ -69,7 +69,7 @@ var findPackage = function (path) {
             filename = filename.filter(function (f) {return f === '.package'});
             if (filename.length) {
                 return {
-                    package: fs.readFileSync(path + filename[0], {encoding: 'utf-8'}),
+                    package: fs.readFileSync(path + filename[0], {encoding: 'utf8'}),
                     packagePath: path
                 };
             }
@@ -80,7 +80,7 @@ var findPackage = function (path) {
 
 var compileJS = function (repo, pathname, callback) {
     var parser = new xml2js.Parser({async: false});
-    parser.parseString(fs.readFileSync(repo + 'template-config.xml', {encoding: 'utf-8'}), function (err, result) {
+    parser.parseString(fs.readFileSync(repo + 'template-config.xml', {encoding: 'utf8'}), function (err, result) {
         try {
             var combineList = {}, fileStr;
             if (result.package.source[0].combine) {
@@ -95,7 +95,7 @@ var compileJS = function (repo, pathname, callback) {
                         var fileStr = '';
                         if (filepath.$.module) {
                             filepath = filepath.$.module;
-                            fileStr = fs.readFileSync(path.join(repo, 'src/node_modules', filepath), {encoding: 'utf-8'});
+                            fileStr = fs.readFileSync(path.join(repo, 'src/node_modules', filepath), {encoding: 'utf8'});
                             if (/\.mustache$/.test(filepath)) {
                                 fileStr = ";object.define('xn/" +
                                     repo.match(/[^\/]+\/$/)[0] +
@@ -128,7 +128,7 @@ var compileJS = function (repo, pathname, callback) {
                                 else {
                                     filepath = path.join(repo, 'src', filepath);
                                     if (fs.existsSync(filepath)) {
-                                        fileStr = fs.readFileSync(filepath, {encoding: 'utf-8'});
+                                        fileStr = fs.readFileSync(filepath, {encoding: 'utf8'});
                                     }
                                     else {
                                         grunt.log.error('错误的路径: ' + filepath);
@@ -141,13 +141,13 @@ var compileJS = function (repo, pathname, callback) {
                             }
                             else if (filepath.indexOf('*') > -1) {
                                 fileStr = grunt.file.expand(path.join(repo, 'src', filepath)).map(function (f) {
-                                    return fs.readFileSync(f);
+                                    return fs.readFileSync(f, {encoding: 'utf8'});
                                 }).join('\n');
                             }
                             else {
                                 filepath = path.join(repo, 'src', filepath);
                                 if (fs.existsSync(filepath)) {
-                                    fileStr = fs.readFileSync(filepath, {encoding: 'utf-8'});
+                                    fileStr = fs.readFileSync(filepath, {encoding: 'utf8'});
                                 }
                                 else {
                                     grunt.log.error('错误的路径: ' + filepath);
@@ -173,7 +173,7 @@ var compileJS = function (repo, pathname, callback) {
 
         var filepath = path.join(repo, 'src/', pathname);
         if (fs.existsSync(filepath)) {
-            fileStr = '/* from: ' + filepath + ' */\n' + fs.readFileSync(filepath, {encoding: 'utf-8'});
+            fileStr = '/* from: ' + filepath + ' */\n' + fs.readFileSync(filepath, {encoding: 'utf8'});
             callback(null, fileStr);
         }
         else {
@@ -194,31 +194,65 @@ var compileCSS = function (repo, pathname, callback) {
                 stack.push(filepath);
             }
             return fs
-                    .readFileSync(filepath, {encoding: 'utf-8'})
+                    .readFileSync(filepath, {encoding: 'utf8'})
                     .replace(/^@import\surl\(["']?([^"'\(\)]+)["']?\);/mg, function (str, p) {
 
-                p = path.join(filepath.replace(/[^\/]+$/, ''), p);
-                if (p.indexOf(repo) === 0) {
-                    if (fs.existsSync(p)) {
-                        return '/* from: ' + p + ' */\n' + readfile(p, stack);
-                    }
-                    else {
-                        grunt.log.error('错误的路径: ' + p);
-                        return '/* ' + p + '不存在 */\n';
-                    }
+                var hasLib = p.match(/^\.\.\/lib\/([^\/]+)\/(.+)$/);
+                if (hasLib) {
+                    var parser = new xml2js.Parser({async: false}), fileStr;
+                    parser.parseString(fs.readFileSync(repo + 'template-config.xml', {encoding: 'utf8'}), function (err, result) {
+                        var map = result.package.library[0].folder || [], filepath;
+                        map = map.filter(function (folder) {return folder.$.name === hasLib[1];});
+                        map = map[0] ? map[0].$.url : undefined;
+                        map = $maps[map];
+                        if (map) {
+                            filepath = hasLib[2].replace(/^(src\/)?/, function (str, p) {return p ? '' : '../'; });
+                            compileCSS(map, filepath, function (err, data) {
+                                if (data) {
+                                    fileStr = data;
+                                }
+                                else {
+                                    fileStr = '/* from: ' + path.join(map, 'src', filepath) + ' */\n';
+                                }
+                            });
+                        }
+                        else {
+                            filepath = path.join(repo, 'src', filepath);
+                            if (fs.existsSync(filepath)) {
+                                fileStr = fs.readFileSync(filepath, {encoding: 'utf8'});
+                            }
+                            else {
+                                grunt.log.error('错误的路径: ' + filepath);
+                            }
+                            fileStr = '/* from: ' + filepath + ' */\n' + fileStr;
+                        }
+                    });
+                    return fileStr;
                 }
                 else {
-                    var res;
-                    compileCSS(p.slice(0, p.indexOf('src')), p.slice(p.indexOf('src') + 4), function (err, data) {
-                        if (data) {
-                            res = '/* from: ' + p + ' */\n' + data;
+                    p = path.join(filepath.replace(/[^\/]+$/, ''), p);
+                    if (p.indexOf(repo) === 0) {
+                        if (fs.existsSync(p)) {
+                            return '/* from: ' + p + ' */\n' + readfile(p, stack);
                         }
                         else {
                             grunt.log.error('错误的路径: ' + p);
-                            res = '/* ' + p + '不存在 */\n';
+                            return '/* ' + p + '不存在 */\n';
                         }
-                    });
-                    return res;
+                    }
+                    else {
+                        var res;
+                        compileCSS(p.slice(0, p.indexOf('src')), p.slice(p.indexOf('src') + 4), function (err, data) {
+                            if (data) {
+                                res = '/* from: ' + p + ' */\n' + data;
+                            }
+                            else {
+                                grunt.log.error('错误的路径: ' + p);
+                                res = '/* ' + p + '不存在 */\n';
+                            }
+                        });
+                        return res;
+                    }
                 }
             });
         },
@@ -232,14 +266,16 @@ var compileCSS = function (repo, pathname, callback) {
     }
 };
 
-var output = function (response, content, type) {
-    if (typeof type === 'string') {
-        response.setHeader('content-type', 'text/' + type);
+var output = function (response, data, type) {
+    var code = type;
+    if (typeof code === 'string') {
+        code = 200;
     }
     else {
-        response.setHeader(String(type), {'content-type': 'text/plain'});
+        type = 'plain';
     }
-    response.write(content);
+    response.writeHeader(code, {'content-type': 'text/' + type, 'Content-Length': Buffer.byteLength(data, 'utf8')});
+    response.write(data, 'utf8');
     response.end();
 };
 
@@ -253,7 +289,7 @@ var onRequest = function (request, response) {
     var readFileSVN = function (type) {
         if (fs.existsSync(svnfilepath)) {
             grunt.log.ok('svn: ' + pathname);
-            output(response, fs.readFileSync(svnfilepath), type);
+            output(response, fs.readFileSync(svnfilepath, {encoding: 'utf8'}), type);
         }
         else {
             grunt.log.error('404: ' + pathname);
