@@ -1,7 +1,7 @@
 {
   "name": "grunt-renren-turbo",
-  "description": "人人网前端开发套件",
-  "version": "0.1.0",
+  "description": "Local JS/CSS Server",
+  "version": "0.1.1",
   "homepage": "https://github.com/viclm/grunt-renren-turbo",
   "author": {
     "name": "ming.liu",
@@ -38,6 +38,6 @@
     "grunt": "~0.4.2"
   },
   "keywords": [
-    "gruntplugin"
+    "turbo"
   ]
 }
