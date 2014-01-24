@@ -1,6 +1,6 @@
 # grunt-renren-turbo
 
-> 人人网前端开发套件
+> Local JS/CSS server
 
 ## Getting Started
 This plugin requires Grunt `~0.4.2`
@@ -37,47 +37,31 @@ grunt.initConfig({
 
 ### Options
 
-#### options.separator
+#### options.base
 Type: `String`
-Default value: `',  '`
+Default value: `'./'`
 
-A string value that is used to do something with whatever.
+Path to workspace.
 
-#### options.punctuation
-Type: `String`
-Default value: `'.'`
+#### options.port
+Type: `Number`
+Default value: `7070`
 
-A string value that is used to do something else with whatever else.
+The port on which the webserver will respond.
 
 ### Usage Examples
 
-#### Default Options
-In this example, the default options are used to do something with whatever. So if the `testing` file has the content `Testing` and the `123` file had the content `1 2 3`, the generated result would be `Testing, 1 2 3.`
-
-```js
-grunt.initConfig({
-  renren_turbo: {
-    options: {},
-    files: {
-      'dest/default_options': ['src/testing', 'src/123'],
-    },
-  },
-});
-```
-
-#### Custom Options
-In this example, custom options are used to do something else with whatever else. So if the `testing` file has the content `Testing` and the `123` file had the content `1 2 3`, the generated result in this case would be `Testing: 1 2 3 !!!`
+#### Typical use
+In this example, set a custom workspace(contains git/hg repos) path, and use the default port(7070) for respond.
+This plugin don't need to specify files.
 
 ```js
 grunt.initConfig({
   renren_turbo: {
     options: {
-      separator: ': ',
-      punctuation: ' !!!',
+      base: 'd:/workhome/workspace'
     },
-    files: {
-      'dest/default_options': ['src/testing', 'src/123'],
-    },
+    files: {},
   },
 });
 ```
